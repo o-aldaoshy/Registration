@@ -1071,7 +1071,7 @@ class WorldPostaAutomationBot:
 
             # Configure EWS connection
             credentials = Credentials(username=EWS_USERNAME, password=EWS_PASSWORD)
-            config = Configuration(server=EWS_URL, credentials=credentials)
+            config = Configuration(service_endpoint=EWS_URL, credentials=credentials)
             account = Account(
                 primary_smtp_address=EWS_USERNAME,
                 config=config,
