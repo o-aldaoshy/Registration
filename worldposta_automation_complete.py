@@ -22,7 +22,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
-from exchangelib import Credentials, Account, Configuration, DELEGATE, Message, Mailbox, HTMLBody, FileAttachment, BASIC
+from exchangelib import Credentials, Account, Configuration, DELEGATE, Message, Mailbox, HTMLBody, FileAttachment, BASIC, Version, Build
 
 
 # =====================================================
@@ -1071,10 +1071,15 @@ class WorldPostaAutomationBot:
 
             # Configure EWS connection
             credentials = Credentials(username=EWS_USERNAME, password=EWS_PASSWORD)
+
+            # Specify Exchange version to avoid auto-detection (which causes 404)
+            version = Version(build=Build(15, 1))  # Exchange 2016
+
             config = Configuration(
                 service_endpoint=EWS_URL,
                 credentials=credentials,
-                auth_type=BASIC  # Use Basic HTTP authentication
+                auth_type=BASIC,  # Use Basic HTTP authentication
+                version=version  # Explicitly set version to avoid auto-detection
             )
             account = Account(
                 primary_smtp_address=EWS_USERNAME,
