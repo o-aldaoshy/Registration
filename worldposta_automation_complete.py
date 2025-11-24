@@ -635,8 +635,364 @@ class WorldPostaAutomationBot:
             return False
 
 
+    def get_browser_console_logs(self):
+        """Capture browser console errors and warnings"""
+        try:
+            logs = self.driver.get_log('browser')
+            errors = []
+            warnings = []
+
+            for entry in logs:
+                level = entry.get('level', '')
+                message = entry.get('message', '')
+
+                if 'SEVERE' in level or 'ERROR' in level:
+                    errors.append(message)
+                elif 'WARNING' in level:
+                    warnings.append(message)
+
+            return {'errors': errors, 'warnings': warnings}
+        except Exception as e:
+            return {'errors': [], 'warnings': [], 'capture_error': str(e)}
+
+
+    def detect_new_tab_or_window(self, original_handles):
+        """Check if a new tab or window was opened"""
+        try:
+            current_handles = self.driver.window_handles
+            if len(current_handles) > len(original_handles):
+                new_handle = list(set(current_handles) - set(original_handles))[0]
+                print(f"  🔄 New tab/window detected!")
+                return new_handle
+            return None
+        except Exception as e:
+            print(f"  ⚠️  Error detecting new window: {e}")
+            return None
+
+
+    def save_page_html_on_failure(self, page_name):
+        """Save page HTML for debugging"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            html_filename = f"{page_name}_failure_{timestamp}.html"
+            html_path = os.path.join(SCREENSHOT_DIR, html_filename)
+
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(self.driver.page_source)
+
+            print(f"  💾 HTML saved: {html_filename}")
+            return html_path
+        except Exception as e:
+            print(f"  ⚠️  Could not save HTML: {e}")
+            return None
+
+
+    def detect_url_reload_loop(self, initial_url, max_checks=5, check_interval=2):
+        """Detect if page is stuck in a reload loop"""
+        print(f"  🔍 Monitoring for reload loops...")
+        url_changes = []
+
+        for i in range(max_checks):
+            current_url = self.driver.current_url
+            url_changes.append(current_url)
+
+            if i > 0:
+                # Check if URL changed back to initial URL
+                if current_url == initial_url and url_changes[-2] != initial_url:
+                    print(f"  ⚠️  Reload loop detected! Returned to: {initial_url}")
+                    return True
+
+            time.sleep(check_interval)
+
+        # Check if we saw multiple different URLs (indicates cycling)
+        unique_urls = set(url_changes)
+        if len(unique_urls) > 2:
+            print(f"  ⚠️  URL cycling detected: {len(unique_urls)} different URLs visited")
+            return True
+
+        return False
+
+
+    def save_diagnostic_report(self, page_name, validation_result):
+        """Save detailed diagnostic report to JSON"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            report_filename = f"{page_name}_diagnostic_{timestamp}.json"
+            report_path = os.path.join(SCREENSHOT_DIR, report_filename)
+
+            with open(report_path, 'w', encoding='utf-8') as f:
+                json.dump(validation_result, f, indent=2, ensure_ascii=False)
+
+            print(f"  📋 Diagnostic report saved: {report_filename}")
+            return report_path
+        except Exception as e:
+            print(f"  ⚠️  Could not save diagnostic report: {e}")
+            return None
+
+
+    def validate_page_load(self, page_name, expected_url_fragment, expected_title_keywords,
+                          expected_text, expected_element_selector, retry_on_failure=True):
+        """
+        Comprehensive page validation with detailed diagnostics (Option C)
+
+        Args:
+            page_name: Name for logging (e.g., "Posta")
+            expected_url_fragment: String that should be in URL
+            expected_title_keywords: List of keywords that might be in title
+            expected_text: Text that should appear on page
+            expected_element_selector: CSS selector for key element
+            retry_on_failure: If True, retry validation once after waiting
+        """
+        print(f"\n🔍 Validating {page_name} page with comprehensive diagnostics...")
+
+        validation_result = {
+            'timestamp': get_timestamp(),
+            'page_name': page_name,
+            'validation_passed': False,
+            'checks': [],
+            'console_logs': {},
+            'recommendations': [],
+            'html_saved': None,
+            'screenshot_saved': None
+        }
+
+        checks_passed = 0
+        total_checks = 0
+
+        # Capture initial state
+        initial_url = self.driver.current_url
+        validation_result['initial_url'] = initial_url
+
+        # Wait for page to settle
+        random_delay(3, 5)
+
+        # === CHECK 1: URL Validation ===
+        total_checks += 1
+        current_url = self.driver.current_url
+        validation_result['current_url'] = current_url
+
+        check_result = {
+            'name': 'URL Validation',
+            'passed': False,
+            'expected': f"URL containing '{expected_url_fragment}'",
+            'actual': current_url
+        }
+
+        if expected_url_fragment.lower() in current_url.lower():
+            print(f"  ✅ URL Check: Contains '{expected_url_fragment}'")
+            check_result['passed'] = True
+            checks_passed += 1
+        else:
+            print(f"  ❌ URL Check Failed")
+            print(f"     Expected: URL containing '{expected_url_fragment}'")
+            print(f"     Actual:   {current_url}")
+            check_result['error'] = f"URL does not contain expected fragment"
+            validation_result['recommendations'].append(f"Check if button opens page in new tab/window")
+
+        validation_result['checks'].append(check_result)
+
+        # === CHECK 2: Title Validation ===
+        total_checks += 1
+        page_title = self.driver.title
+        validation_result['page_title'] = page_title
+
+        check_result = {
+            'name': 'Page Title Validation',
+            'passed': False,
+            'expected': f"Title containing keywords: {expected_title_keywords}",
+            'actual': page_title
+        }
+
+        if any(keyword.lower() in page_title.lower() for keyword in expected_title_keywords):
+            print(f"  ✅ Title Check: '{page_title}'")
+            check_result['passed'] = True
+            checks_passed += 1
+        else:
+            print(f"  ❌ Title Check Failed")
+            print(f"     Expected: Keywords {expected_title_keywords}")
+            print(f"     Actual:   {page_title}")
+            check_result['error'] = f"Title doesn't match expected keywords"
+
+        validation_result['checks'].append(check_result)
+
+        # === CHECK 3: Expected Text Validation ===
+        total_checks += 1
+        page_source = self.driver.page_source
+
+        check_result = {
+            'name': 'Expected Text Validation',
+            'passed': False,
+            'expected': f"Page containing text: '{expected_text}'",
+            'actual': None
+        }
+
+        if expected_text in page_source:
+            print(f"  ✅ Text Check: Found '{expected_text}'")
+            check_result['passed'] = True
+            check_result['actual'] = f"Text found on page"
+            checks_passed += 1
+        else:
+            print(f"  ❌ Text Check Failed")
+            print(f"     Expected text not found: '{expected_text}'")
+            check_result['error'] = f"Expected text not present on page"
+            validation_result['recommendations'].append(f"Verify page loaded correctly - expected text missing")
+
+        validation_result['checks'].append(check_result)
+
+        # === CHECK 4: Key Element Validation ===
+        total_checks += 1
+        check_result = {
+            'name': 'Key Element Validation',
+            'passed': False,
+            'expected': f"Element with selector: '{expected_element_selector}'",
+            'actual': None
+        }
+
+        try:
+            element = self.driver.find_element(By.CSS_SELECTOR, expected_element_selector)
+            if element.is_displayed():
+                print(f"  ✅ Element Check: Found and visible")
+                check_result['passed'] = True
+                check_result['actual'] = "Element found and displayed"
+                checks_passed += 1
+            else:
+                print(f"  ⚠️  Element Check: Found but not visible")
+                check_result['actual'] = "Element found but not displayed"
+        except NoSuchElementException:
+            print(f"  ❌ Element Check Failed")
+            print(f"     Element not found: {expected_element_selector}")
+            check_result['error'] = f"Expected element not found on page"
+            validation_result['recommendations'].append(f"Element selector may have changed: {expected_element_selector}")
+
+        validation_result['checks'].append(check_result)
+
+        # === CHECK 5: No Error Messages ===
+        total_checks += 1
+        error_keywords = ["error", "failed", "not found", "404", "403", "500", "denied", "unauthorized"]
+        page_source_lower = page_source.lower()
+
+        check_result = {
+            'name': 'Error Detection',
+            'passed': True,
+            'expected': 'No error keywords on page',
+            'actual': None
+        }
+
+        found_errors = [keyword for keyword in error_keywords if keyword in page_source_lower]
+
+        if not found_errors:
+            print(f"  ✅ Error Check: No error keywords detected")
+            check_result['actual'] = "No errors found"
+            checks_passed += 1
+        else:
+            print(f"  ⚠️  Error Check: Potential errors detected")
+            print(f"     Found keywords: {', '.join(found_errors)}")
+            check_result['passed'] = False
+            check_result['error'] = f"Error keywords found: {', '.join(found_errors)}"
+            check_result['actual'] = f"Errors detected: {', '.join(found_errors)}"
+            validation_result['recommendations'].append(f"Check page for error messages - keywords detected: {', '.join(found_errors)}")
+
+        validation_result['checks'].append(check_result)
+
+        # === CHECK 6: Page Not Blank ===
+        total_checks += 1
+        page_size = len(page_source)
+
+        check_result = {
+            'name': 'Page Content Check',
+            'passed': False,
+            'expected': 'Page size > 500 characters',
+            'actual': f'{page_size} characters'
+        }
+
+        if page_size > 500:
+            print(f"  ✅ Content Check: Page has content ({page_size} chars)")
+            check_result['passed'] = True
+            checks_passed += 1
+        else:
+            print(f"  ❌ Content Check: Page appears blank ({page_size} chars)")
+            check_result['error'] = "Page appears blank or minimal content"
+
+        validation_result['checks'].append(check_result)
+
+        # === Capture Browser Console Logs ===
+        print(f"  📋 Capturing browser console logs...")
+        console_logs = self.get_browser_console_logs()
+        validation_result['console_logs'] = console_logs
+
+        if console_logs.get('errors'):
+            print(f"  ⚠️  Browser Console Errors ({len(console_logs['errors'])}):")
+            for error in console_logs['errors'][:3]:  # Show first 3
+                print(f"     - {error[:100]}...")
+            validation_result['recommendations'].append("Check browser console for JavaScript errors")
+        else:
+            print(f"  ✅ No browser console errors")
+
+        # === Calculate Success Rate ===
+        success_rate = checks_passed / total_checks if total_checks > 0 else 0
+        validation_result['checks_passed'] = checks_passed
+        validation_result['total_checks'] = total_checks
+        validation_result['success_rate'] = success_rate
+
+        # === Determine if Validation Passed ===
+        validation_passed = success_rate >= 0.67  # Pass if 67% of checks passed (4 out of 6)
+
+        if validation_passed:
+            print(f"\n✅ {page_name} Validation PASSED ({checks_passed}/{total_checks} checks, {success_rate*100:.1f}%)")
+            validation_result['validation_passed'] = True
+
+            # Take success screenshot
+            screenshot_path = os.path.join(SCREENSHOT_DIR, get_screenshot_filename(self.account_data['email'], f'{page_name.lower()}_success'))
+            self.driver.save_screenshot(screenshot_path)
+            validation_result['screenshot_saved'] = screenshot_path
+            print(f"📸 Success screenshot saved: {os.path.basename(screenshot_path)}")
+
+            return True, validation_result
+        else:
+            print(f"\n❌ {page_name} Validation FAILED ({checks_passed}/{total_checks} checks, {success_rate*100:.1f}%)")
+
+            # === Save Diagnostic Data on Failure ===
+            print(f"\n💾 Saving diagnostic data...")
+
+            # Save screenshot
+            screenshot_path = os.path.join(SCREENSHOT_DIR, get_screenshot_filename(self.account_data['email'], f'{page_name.lower()}_validation_error'))
+            self.driver.save_screenshot(screenshot_path)
+            validation_result['screenshot_saved'] = screenshot_path
+            print(f"  📸 Error screenshot saved: {os.path.basename(screenshot_path)}")
+
+            # Save HTML
+            html_path = self.save_page_html_on_failure(page_name.lower())
+            validation_result['html_saved'] = html_path
+
+            # Save diagnostic report
+            report_path = self.save_diagnostic_report(page_name.lower(), validation_result)
+            validation_result['diagnostic_report'] = report_path
+
+            # === Show Recommendations ===
+            if validation_result['recommendations']:
+                print(f"\n💡 Troubleshooting Suggestions:")
+                for i, rec in enumerate(validation_result['recommendations'], 1):
+                    print(f"  {i}. {rec}")
+
+            # === Retry Logic ===
+            if retry_on_failure:
+                print(f"\n🔄 Retrying validation after 5 seconds...")
+                time.sleep(5)
+                print(f"  🔄 Refreshing page...")
+                self.driver.refresh()
+                random_delay(3, 5)
+
+                print(f"  🔄 Running validation again (no retry this time)...")
+                return self.validate_page_load(
+                    page_name, expected_url_fragment, expected_title_keywords,
+                    expected_text, expected_element_selector, retry_on_failure=False
+                )
+
+            return False, validation_result
+
+
     def perform_post_login_actions(self):
-        """Perform actions after login: Click View Posta and View CloudEdge buttons"""
+        """Perform actions after login: Click View Posta and View CloudEdge buttons with comprehensive validation"""
         print("\n" + "="*60)
         print("🎯 STEP 7: POST-LOGIN ACTIONS")
         print("="*60)
@@ -644,6 +1000,10 @@ class WorldPostaAutomationBot:
         try:
             # Wait for dashboard to fully load
             random_delay(3, 5)
+
+            # Store original window handles
+            original_handles = self.driver.window_handles
+            original_url = self.driver.current_url
 
             # Scroll to reveal buttons
             print("📜 Scrolling to reveal action buttons...")
@@ -661,49 +1021,118 @@ class WorldPostaAutomationBot:
                 print(f"⚠ {error_msg}")
                 self.status_log['error_message'] = error_msg
 
-            # Click first button (View Posta)
+            # ==================== VIEW POSTA ====================
             if len(launch_buttons) >= 1:
-                print("🖱️  Clicking 'View Posta' button...")
+                print("\n" + "-"*60)
+                print("📧 CLICKING 'VIEW POSTA' BUTTON")
+                print("-"*60)
+
                 posta_button = launch_buttons[0]
                 self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", posta_button)
                 random_delay(1, 2)
                 human_like_mouse_move(self.driver, posta_button)
                 random_delay(0.5, 1)
+
+                # Click button
                 self.driver.execute_script("arguments[0].click();", posta_button)
                 print("✅ Clicked 'View Posta' button")
+
+                # Check for new tab/window
+                random_delay(2, 3)
+                new_handle = self.detect_new_tab_or_window(original_handles)
+                if new_handle:
+                    print("  🔄 Switching to new tab/window...")
+                    self.driver.switch_to.window(new_handle)
+                    random_delay(2, 3)
+
+                # Check for reload loop
+                if self.detect_url_reload_loop(original_url, max_checks=3, check_interval=2):
+                    print("  ⚠️  Page stuck in reload loop!")
+                    self.status_log['error_message'] = "Posta page stuck in reload loop"
+
+                # Validate Posta page loaded correctly
+                posta_validation, posta_report = self.validate_page_load(
+                    page_name="Posta",
+                    expected_url_fragment="tools.worldposta.com",
+                    expected_title_keywords=["WorldPosta", "Tools", "Posta"],
+                    expected_text="Choose a Plan to Start Your Demo",
+                    expected_element_selector='a.btn[style*="color: white"]',
+                    retry_on_failure=True
+                )
+
+                if not posta_validation:
+                    error_msg = f"Posta page validation failed ({posta_report['checks_passed']}/{posta_report['total_checks']} checks)"
+                    print(f"❌ {error_msg}")
+                    self.status_log['error_message'] = error_msg
+                    # Continue anyway to try CloudEdge
+
+                # Navigate back to dashboard
+                print("\n⬅️  Navigating back to dashboard...")
+                if new_handle:
+                    self.driver.close()
+                    self.driver.switch_to.window(original_handles[0])
+                else:
+                    self.driver.back()
                 random_delay(3, 5)
 
-                # Take screenshot
-                screenshot_path = os.path.join(SCREENSHOT_DIR, get_screenshot_filename(self.account_data['email'], 'view_posta'))
-                self.driver.save_screenshot(screenshot_path)
-                print(f"📸 Screenshot saved: {screenshot_path}")
-
-                # Navigate back if needed
-                print("⬅️  Navigating back to dashboard...")
-                self.driver.back()
-                random_delay(3, 5)
-
-            # Click second button (View CloudEdge)
+            # ==================== VIEW CLOUDEDGE ====================
             if len(launch_buttons) >= 2:
+                print("\n" + "-"*60)
+                print("☁️  CLICKING 'VIEW CLOUDEDGE' BUTTON")
+                print("-"*60)
+
                 # Re-find buttons after navigation
                 launch_buttons = self.driver.find_elements(By.CSS_SELECTOR, 'button.launch-button')
+                original_handles = self.driver.window_handles
+                original_url = self.driver.current_url
 
-                print("🖱️  Clicking 'View CloudEdge' button...")
                 cloudedge_button = launch_buttons[1]
                 self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", cloudedge_button)
                 random_delay(1, 2)
                 human_like_mouse_move(self.driver, cloudedge_button)
                 random_delay(0.5, 1)
+
+                # Click button
                 self.driver.execute_script("arguments[0].click();", cloudedge_button)
                 print("✅ Clicked 'View CloudEdge' button")
-                random_delay(3, 5)
 
-                # Take screenshot
-                screenshot_path = os.path.join(SCREENSHOT_DIR, get_screenshot_filename(self.account_data['email'], 'view_cloudedge'))
+                # Check for new tab/window
+                random_delay(2, 3)
+                new_handle = self.detect_new_tab_or_window(original_handles)
+                if new_handle:
+                    print("  🔄 Switching to new tab/window...")
+                    self.driver.switch_to.window(new_handle)
+                    random_delay(2, 3)
+
+                # Check for reload loop
+                if self.detect_url_reload_loop(original_url, max_checks=3, check_interval=2):
+                    print("  ⚠️  Page stuck in reload loop!")
+                    self.status_log['error_message'] = "CloudEdge page stuck in reload loop"
+
+                # Validate CloudEdge page loaded correctly
+                cloudedge_validation, cloudedge_report = self.validate_page_load(
+                    page_name="CloudEdge",
+                    expected_url_fragment="console.worldposta.com",
+                    expected_title_keywords=["CloudEdge", "Console", "WorldPosta"],
+                    expected_text="Complete Your Main Info",
+                    expected_element_selector='button.green-btn[type="submit"]',
+                    retry_on_failure=True
+                )
+
+                if not cloudedge_validation:
+                    error_msg = f"CloudEdge page validation failed ({cloudedge_report['checks_passed']}/{cloudedge_report['total_checks']} checks)"
+                    print(f"❌ {error_msg}")
+                    self.status_log['error_message'] = error_msg
+                    return False
+
+                # Take final screenshot
+                screenshot_path = os.path.join(SCREENSHOT_DIR, get_screenshot_filename(self.account_data['email'], 'cloudedge_final'))
                 self.driver.save_screenshot(screenshot_path)
-                print(f"📸 Screenshot saved: {screenshot_path}")
+                print(f"📸 Final screenshot saved: {os.path.basename(screenshot_path)}")
 
-            print("✅ All post-login actions completed")
+            print("\n" + "="*60)
+            print("✅ All post-login actions completed successfully")
+            print("="*60)
             return True
 
         except Exception as e:
