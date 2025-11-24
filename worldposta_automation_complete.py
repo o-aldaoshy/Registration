@@ -43,9 +43,9 @@ LOGIN_URL = "https://admin.worldposta.com/auth/login"
 EMAIL_DOMAIN = "@worldposta.com"
 EMAIL_SUBJECT_KEYWORD = "Welcome To WorldPosta Business Email"
 
-# Email Notification Settings
-SMTP_SERVER = "imap.worldposta.com"
-SMTP_PORT = 465
+# Email Notification Settings (Microsoft Exchange)
+SMTP_SERVER = "smtp.worldposta.com"
+SMTP_PORT = 587  # STARTTLS port for Microsoft Exchange
 NOTIFICATION_RECIPIENT = "o.aldaoshy@roaya.co"
 
 # Timeouts
@@ -1108,8 +1108,11 @@ class WorldPostaAutomationBot:
             # === Send Email ===
             print(f"\n📤 Connecting to SMTP server: {SMTP_SERVER}:{SMTP_PORT}")
 
-            # Use SSL connection
-            with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+            # Use STARTTLS connection for Microsoft Exchange
+            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+                print(f"  🔒 Starting TLS encryption...")
+                server.starttls()  # Upgrade to secure connection
+
                 print(f"  🔐 Logging in as: {self.account_data['email']}")
                 server.login(self.account_data['email'], self.account_data['password'])
 
