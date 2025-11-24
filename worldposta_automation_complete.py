@@ -22,12 +22,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.image import MIMEImage
-from email.mime.base import MIMEBase
-from email import encoders
+from exchangelib import Credentials, Account, Configuration, DELEGATE, Message, Mailbox, HTMLBody, FileAttachment
 
 
 # =====================================================
@@ -43,14 +38,10 @@ LOGIN_URL = "https://admin.worldposta.com/auth/login"
 EMAIL_DOMAIN = "@worldposta.com"
 EMAIL_SUBJECT_KEYWORD = "Welcome To WorldPosta Business Email"
 
-# Email Notification Settings (Microsoft Exchange)
-# Multiple SMTP configurations to try (will attempt in order)
-SMTP_CONFIGS = [
-    {"server": "mail.worldposta.com", "port": 587, "use_ssl": False, "use_tls": True},   # STARTTLS
-    {"server": "mail.worldposta.com", "port": 465, "use_ssl": True, "use_tls": False},   # SSL
-    {"server": "smtp.worldposta.com", "port": 587, "use_ssl": False, "use_tls": True},   # STARTTLS
-    {"server": "smtp.worldposta.com", "port": 465, "use_ssl": True, "use_tls": False},   # SSL
-]
+# Email Notification Settings (Microsoft Exchange Web Services)
+EWS_URL = "https://mail.worldposta.com/EWS/Exchange.asmx"
+EWS_USERNAME = "ai.dexter85@worldposta.com"
+EWS_PASSWORD = "gtzwO@lvr+A82biD5Xdmepf7rk/*yl1"
 NOTIFICATION_RECIPIENT = "o.aldaoshy@roaya.co"
 
 # Timeouts
@@ -1017,13 +1008,6 @@ class WorldPostaAutomationBot:
             # Prepare email subject with full_name
             subject = f"Test Results: {self.account_data['full_name']}"
 
-            # Create message
-            msg = MIMEMultipart('mixed')
-            msg['From'] = self.account_data['email']
-            msg['To'] = NOTIFICATION_RECIPIENT
-            msg['Subject'] = subject
-
-            # === Email Body ===
             # Determine test status
             status = self.status_log.get('status', 'Unknown')
             error_msg = self.status_log.get('error_message', 'None')
@@ -1081,19 +1065,37 @@ class WorldPostaAutomationBot:
             </html>
             """
 
-            # Attach HTML body
-            msg.attach(MIMEText(html_body, 'html'))
+            # === Send Email using Exchange Web Services (EWS) ===
+            print(f"\n📤 Connecting to Exchange Web Services (EWS)")
+            print(f"   EWS URL: {EWS_URL}")
+
+            # Configure EWS connection
+            credentials = Credentials(username=EWS_USERNAME, password=EWS_PASSWORD)
+            config = Configuration(server=EWS_URL, credentials=credentials)
+            account = Account(
+                primary_smtp_address=EWS_USERNAME,
+                config=config,
+                autodiscover=False,
+                access_type=DELEGATE
+            )
+
+            print(f"  🔐 Authenticated as: {EWS_USERNAME}")
+
+            # Create message
+            message = Message(
+                account=account,
+                subject=subject,
+                body=HTMLBody(html_body),
+                to_recipients=[Mailbox(email_address=NOTIFICATION_RECIPIENT)]
+            )
 
             # === Attach Screenshots ===
             screenshot_path = self.status_log.get('screenshot_path', '')
-            if screenshot_path:
-                # Extract directory from the screenshot path
-                # The screenshot_path contains individual filenames, but they're all in SCREENSHOT_DIR
-                screenshot_dir = SCREENSHOT_DIR
+            attached_count = 0
 
-                # Find all screenshots from this session (based on timestamp in filename)
+            if screenshot_path:
+                screenshot_dir = SCREENSHOT_DIR
                 import glob
-                timestamp_str = self.status_log.get('timestamp', '').replace(':', '-').replace(' ', '_')
 
                 # Get all PNG files in the screenshot directory
                 if os.path.exists(screenshot_dir):
@@ -1104,59 +1106,24 @@ class WorldPostaAutomationBot:
                         try:
                             with open(screenshot_file, 'rb') as f:
                                 img_data = f.read()
-                                image = MIMEImage(img_data, name=os.path.basename(screenshot_file))
-                                msg.attach(image)
-                            print(f"  ✅ Attached screenshot: {os.path.basename(screenshot_file)}")
+                                file_attachment = FileAttachment(
+                                    name=os.path.basename(screenshot_file),
+                                    content=img_data
+                                )
+                                message.attach(file_attachment)
+                                attached_count += 1
+                                print(f"  ✅ Attached screenshot: {os.path.basename(screenshot_file)}")
                         except Exception as e:
                             print(f"  ⚠️  Failed to attach {os.path.basename(screenshot_file)}: {str(e)}")
 
-            # === Send Email ===
-            # Try each SMTP configuration until one works
-            last_error = None
-            for i, config in enumerate(SMTP_CONFIGS, 1):
-                try:
-                    smtp_server = config['server']
-                    smtp_port = config['port']
-                    use_ssl = config['use_ssl']
-                    use_tls = config['use_tls']
+            # Send the message
+            print(f"  📧 Sending email to: {NOTIFICATION_RECIPIENT}")
+            print(f"  📎 Attachments: {attached_count} screenshot(s)")
 
-                    connection_type = "SSL" if use_ssl else ("STARTTLS" if use_tls else "Plain")
-                    print(f"\n📤 Attempt {i}/{len(SMTP_CONFIGS)}: Connecting to {smtp_server}:{smtp_port} ({connection_type})")
+            message.send()
 
-                    # Create appropriate connection type
-                    if use_ssl:
-                        # Direct SSL connection (port 465)
-                        server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30)
-                    else:
-                        # Plain SMTP, optionally upgraded with STARTTLS (port 587 or 25)
-                        server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
-                        if use_tls:
-                            print(f"  🔒 Starting TLS encryption...")
-                            server.starttls()
-
-                    # Login and send
-                    print(f"  🔐 Logging in as: {self.account_data['email']}")
-                    server.login(self.account_data['email'], self.account_data['password'])
-
-                    print(f"  📧 Sending email to: {NOTIFICATION_RECIPIENT}")
-                    server.send_message(msg)
-
-                    print(f"  ✅ Email sent successfully using {smtp_server}:{smtp_port}!")
-                    server.quit()
-                    return True
-
-                except Exception as e:
-                    last_error = e
-                    error_type = type(e).__name__
-                    print(f"  ❌ Failed: {error_type} - {str(e)}")
-                    if i < len(SMTP_CONFIGS):
-                        print(f"  🔄 Trying next configuration...")
-                    continue
-
-            # All attempts failed
-            print(f"\n❌ All SMTP configurations failed. Last error:")
-            print(f"   {type(last_error).__name__}: {str(last_error)}")
-            return False
+            print(f"  ✅ Email sent successfully via EWS!")
+            return True
 
         except Exception as e:
             print(f"❌ Unexpected error in send_email_report: {str(e)}")
