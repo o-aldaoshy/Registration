@@ -22,7 +22,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
-from exchangelib import Credentials, Account, Configuration, DELEGATE, Message, Mailbox, HTMLBody, FileAttachment
+from exchangelib import Credentials, Account, Configuration, DELEGATE, Message, Mailbox, HTMLBody, FileAttachment, BASIC
 
 
 # =====================================================
@@ -1071,7 +1071,11 @@ class WorldPostaAutomationBot:
 
             # Configure EWS connection
             credentials = Credentials(username=EWS_USERNAME, password=EWS_PASSWORD)
-            config = Configuration(service_endpoint=EWS_URL, credentials=credentials)
+            config = Configuration(
+                service_endpoint=EWS_URL,
+                credentials=credentials,
+                auth_type=BASIC  # Use Basic HTTP authentication
+            )
             account = Account(
                 primary_smtp_address=EWS_USERNAME,
                 config=config,
