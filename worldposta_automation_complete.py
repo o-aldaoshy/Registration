@@ -1125,7 +1125,7 @@ class WorldPostaAutomationBot:
             print(f"  📎 Attachments: {attached_count} screenshot(s)")
 
             # Send without saving copy to Sent folder (avoids 404 errors)
-            message.send_and_save(save_copy=False)
+            message.send(save_copy=False)
 
             print(f"  ✅ Email sent successfully via EWS!")
             return True
