@@ -55,7 +55,7 @@ CUSTOM_TEST_ACCOUNT = {
     'email': "ai.dexter85@worldposta.com",
     'company': "AI Company dexter85",
     'phone': "1095666032",
-    'password': "gtzwO@lvr+A82biD5Xdme pf7k/*y1"
+    'password': "gtzwO@lvr+A82biD5Xdmepf7k/*y1"
 }
 
 
