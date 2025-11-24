@@ -3,9 +3,8 @@ WorldPosta Complete Automation Suite
 All-in-one script for registration, email verification, and login automation
 
 Usage:
-    python worldposta_automation_complete.py                    # Run with your custom test data
+    python worldposta_automation_complete.py                    # Run with your custom test data (default)
     python worldposta_automation_complete.py --random           # Generate random test account
-    python worldposta_automation_complete.py --batch            # Process multiple accounts from CSV
     python worldposta_automation_complete.py --headless         # Run in headless mode
 """
 
@@ -46,11 +45,6 @@ DEFAULT_TIMEOUT = 30  # default WebDriverWait timeout
 SCREENSHOT_DIR = r"C:\Users\olaaa\Desktop\Projects\Registeration\SS"
 CSV_FILE = "registration_results.csv"
 JSON_FILE = "registration_results.json"
-BATCH_INPUT_CSV = "accounts_to_register.csv"
-
-# Batch Processing Settings
-BATCH_DELAY_MIN = 60  # Minimum seconds between accounts
-BATCH_DELAY_MAX = 120  # Maximum seconds between accounts
 
 # =====================================================
 # YOUR CUSTOM TEST ACCOUNT DATA
@@ -122,65 +116,6 @@ def get_screenshot_filename(email, status):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_email = email.replace("@", "_at_").replace(".", "_")
     return f"{safe_email}_{status}_{timestamp}.png"
-
-
-def read_accounts_from_csv(filename):
-    """
-    Read account data from CSV file
-    Expected CSV format:
-    full_name,email,company,phone,password
-    """
-    accounts = []
-    try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                accounts.append({
-                    'full_name': row['full_name'],
-                    'email': row['email'],
-                    'company': row['company'],
-                    'phone': row['phone'],
-                    'password': row['password']
-                })
-        print(f"✅ Loaded {len(accounts)} accounts from {filename}")
-        return accounts
-    except FileNotFoundError:
-        print(f"❌ File not found: {filename}")
-        print(f"📝 Creating sample CSV file...")
-        create_sample_csv(filename)
-        return []
-    except Exception as e:
-        print(f"❌ Error reading CSV: {e}")
-        return []
-
-
-def create_sample_csv(filename):
-    """Create a sample CSV file with the correct format"""
-    sample_data = [
-        {
-            'full_name': 'John Doe',
-            'email': 'john.doe@worldposta.com',
-            'company': 'Acme Corp',
-            'phone': '+15551234567',
-            'password': 'SecurePass@123'
-        },
-        {
-            'full_name': 'Jane Smith',
-            'email': 'jane.smith@worldposta.com',
-            'company': 'TechCorp',
-            'phone': '+15559876543',
-            'password': 'SecurePass@456'
-        }
-    ]
-
-    with open(filename, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=['full_name', 'email', 'company', 'phone', 'password'])
-        writer.writeheader()
-        for row in sample_data:
-            writer.writerow(row)
-
-    print(f"✅ Sample CSV created: {filename}")
-    print(f"📝 Edit this file with your account data and run with --batch flag")
 
 
 # =====================================================
@@ -933,14 +868,19 @@ class WorldPostaAutomationBot:
 # EXECUTION MODES
 # =====================================================
 
-def run_single_test(headless=False, account_data=None):
-    """Run single automation test with specified account data"""
+def run_automation(headless=False, use_random=False):
+    """Run automation with custom or random account"""
     bot = None
     try:
         bot = WorldPostaAutomationBot(headless=headless)
 
-        if account_data is None:
+        # Use random or custom account
+        if use_random:
+            account_data = generate_random_account()
+            print(f"\n🎲 Generated random account: {account_data['email']}")
+        else:
             account_data = CUSTOM_TEST_ACCOUNT
+            print(f"\n✅ Using custom test account: {account_data['email']}")
 
         success = bot.run_full_workflow(account_data)
 
@@ -960,91 +900,6 @@ def run_single_test(headless=False, account_data=None):
             bot.close()
 
 
-def run_random_test(headless=False):
-    """Run automation with randomly generated account"""
-    account_data = generate_random_account()
-    print(f"\n🎲 Generated random account: {account_data['email']}")
-    return run_single_test(headless=headless, account_data=account_data)
-
-
-def run_batch_processing(headless=False):
-    """Process multiple accounts from CSV"""
-    print("="*60)
-    print("🚀 WORLDPOSTA BATCH AUTOMATION")
-    print("="*60)
-
-    # Read accounts from CSV
-    accounts = read_accounts_from_csv(BATCH_INPUT_CSV)
-
-    if not accounts:
-        print("\n⚠️  No accounts to process. Exiting.")
-        return
-
-    total_accounts = len(accounts)
-    successful = 0
-    failed = 0
-
-    print(f"\n📊 Total accounts to process: {total_accounts}")
-    print(f"⏱️  Delay between accounts: {BATCH_DELAY_MIN}-{BATCH_DELAY_MAX} seconds")
-    print(f"🖥️  Headless mode: {'Enabled' if headless else 'Disabled'}")
-
-    bot = None
-
-    try:
-        # Initialize bot once for all accounts
-        bot = WorldPostaAutomationBot(headless=headless)
-
-        for idx, account_data in enumerate(accounts, 1):
-            print("\n" + "#"*60)
-            print(f"🔄 PROCESSING ACCOUNT {idx}/{total_accounts}")
-            print("#"*60)
-            print(f"📧 Email: {account_data['email']}")
-            print(f"👤 Name: {account_data['full_name']}")
-            print(f"🏢 Company: {account_data['company']}")
-
-            # Run workflow for this account
-            try:
-                success = bot.run_full_workflow(account_data)
-
-                if success:
-                    successful += 1
-                    print(f"✅ Account {idx}/{total_accounts} completed successfully")
-                else:
-                    failed += 1
-                    print(f"❌ Account {idx}/{total_accounts} failed")
-
-            except Exception as e:
-                failed += 1
-                print(f"❌ Account {idx}/{total_accounts} failed with error: {e}")
-
-            # Wait before next account (if not last)
-            if idx < total_accounts:
-                wait_time = random.uniform(BATCH_DELAY_MIN, BATCH_DELAY_MAX)
-                print(f"\n⏳ Waiting {int(wait_time)} seconds before next account...")
-                time.sleep(wait_time)
-
-        # Final summary
-        print("\n" + "="*60)
-        print("📊 BATCH AUTOMATION COMPLETE")
-        print("="*60)
-        print(f"✅ Successful: {successful}/{total_accounts}")
-        print(f"❌ Failed: {failed}/{total_accounts}")
-        print(f"📁 Results saved to: {CSV_FILE} and {JSON_FILE}")
-        print("="*60)
-
-    except KeyboardInterrupt:
-        print("\n⚠️  Batch processing interrupted by user")
-        print(f"📊 Processed: {successful + failed}/{total_accounts}")
-        print(f"✅ Successful: {successful}")
-        print(f"❌ Failed: {failed}")
-    finally:
-        if bot:
-            if not headless:
-                print("\n⏸️  Browser will stay open. Press ENTER to close...")
-                input("Press ENTER to close browser and exit...")
-            bot.close()
-
-
 # =====================================================
 # MAIN
 # =====================================================
@@ -1055,18 +910,15 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python worldposta_automation_complete.py                    # Run with custom test data
-  python worldposta_automation_complete.py --random           # Generate random account
-  python worldposta_automation_complete.py --batch            # Process accounts from CSV
+  python worldposta_automation_complete.py                    # Run with your custom test data (default)
+  python worldposta_automation_complete.py --random           # Generate random test account
   python worldposta_automation_complete.py --headless         # Run in headless mode
-  python worldposta_automation_complete.py --batch --headless # Batch in headless mode
+  python worldposta_automation_complete.py --random --headless # Random account in headless mode
         """
     )
 
     parser.add_argument('--random', action='store_true',
                        help='Generate random test account instead of using custom data')
-    parser.add_argument('--batch', action='store_true',
-                       help='Process multiple accounts from CSV file')
     parser.add_argument('--headless', action='store_true',
                        help='Run browser in headless mode (hidden)')
 
@@ -1078,15 +930,7 @@ Examples:
     print("="*60)
 
     try:
-        if args.batch:
-            # Batch processing mode
-            run_batch_processing(headless=args.headless)
-        elif args.random:
-            # Random account mode
-            run_random_test(headless=args.headless)
-        else:
-            # Custom test data mode (default)
-            run_single_test(headless=args.headless)
+        run_automation(headless=args.headless, use_random=args.random)
 
     except KeyboardInterrupt:
         print("\n⚠️  Interrupted by user")
