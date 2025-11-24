@@ -1021,13 +1021,22 @@ class WorldPostaAutomationBot:
                 print(f"⚠ {error_msg}")
                 self.status_log['error_message'] = error_msg
 
+            # Find buttons by their text content
+            posta_button = None
+            cloudedge_button = None
+
+            for button in launch_buttons:
+                button_text = button.text.strip()
+                if "View Posta" in button_text:
+                    posta_button = button
+                elif "View CloudEdge" in button_text:
+                    cloudedge_button = button
+
             # ==================== VIEW POSTA ====================
-            if len(launch_buttons) >= 1:
+            if posta_button:
                 print("\n" + "-"*60)
                 print("📧 CLICKING 'VIEW POSTA' BUTTON")
                 print("-"*60)
-
-                posta_button = launch_buttons[0]
                 self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", posta_button)
                 random_delay(1, 2)
                 human_like_mouse_move(self.driver, posta_button)
@@ -1076,17 +1085,27 @@ class WorldPostaAutomationBot:
                 random_delay(3, 5)
 
             # ==================== VIEW CLOUDEDGE ====================
-            if len(launch_buttons) >= 2:
+            if cloudedge_button:
                 print("\n" + "-"*60)
                 print("☁️  CLICKING 'VIEW CLOUDEDGE' BUTTON")
                 print("-"*60)
 
-                # Re-find buttons after navigation
+                # Re-find buttons after navigation by text matching
                 launch_buttons = self.driver.find_elements(By.CSS_SELECTOR, 'button.launch-button')
+                cloudedge_button = None
+                for button in launch_buttons:
+                    button_text = button.text.strip()
+                    if "View CloudEdge" in button_text:
+                        cloudedge_button = button
+                        break
+
+                if not cloudedge_button:
+                    print("❌ CloudEdge button not found after navigation")
+                    self.status_log['error_message'] = "CloudEdge button not found"
+                    return False
+
                 original_handles = self.driver.window_handles
                 original_url = self.driver.current_url
-
-                cloudedge_button = launch_buttons[1]
                 self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", cloudedge_button)
                 random_delay(1, 2)
                 human_like_mouse_move(self.driver, cloudedge_button)
