@@ -22,6 +22,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
+from email.mime.base import MIMEBase
+from email import encoders
 
 
 # =====================================================
@@ -36,6 +42,11 @@ LOGIN_URL = "https://admin.worldposta.com/auth/login"
 # Email Settings
 EMAIL_DOMAIN = "@worldposta.com"
 EMAIL_SUBJECT_KEYWORD = "Welcome To WorldPosta Business Email"
+
+# Email Notification Settings
+SMTP_SERVER = "imap.worldposta.com"
+SMTP_PORT = 465
+NOTIFICATION_RECIPIENT = "o.aldaoshy@roaya.co"
 
 # Timeouts
 EMAIL_WAIT_TIMEOUT = 300  # seconds to wait for verification email (5 minutes)
@@ -991,6 +1002,132 @@ class WorldPostaAutomationBot:
             return False, validation_result
 
 
+    def send_email_report(self):
+        """Send email notification with test results, screenshots, and JSON logs"""
+        print("\n" + "="*60)
+        print("📧 SENDING EMAIL NOTIFICATION")
+        print("="*60)
+
+        try:
+            # Prepare email subject with full_name
+            subject = f"Test Results: {self.account_data['full_name']}"
+
+            # Create message
+            msg = MIMEMultipart('mixed')
+            msg['From'] = self.account_data['email']
+            msg['To'] = NOTIFICATION_RECIPIENT
+            msg['Subject'] = subject
+
+            # === Email Body ===
+            # Determine test status
+            status = self.status_log.get('status', 'Unknown')
+            error_msg = self.status_log.get('error_message', 'None')
+
+            # Create HTML email body
+            html_body = f"""
+            <html>
+                <head>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; line-height: 1.6; }}
+                        .header {{ background-color: #4CAF50; color: white; padding: 20px; text-align: center; }}
+                        .header.failed {{ background-color: #f44336; }}
+                        .content {{ padding: 20px; }}
+                        .status {{ font-size: 24px; font-weight: bold; margin: 10px 0; }}
+                        .section {{ margin: 20px 0; padding: 15px; background-color: #f5f5f5; border-radius: 5px; }}
+                        .section-title {{ font-weight: bold; color: #333; margin-bottom: 10px; }}
+                        .error {{ color: #f44336; }}
+                        .json-log {{ background-color: #263238; color: #aed581; padding: 15px; border-radius: 5px;
+                                     font-family: 'Courier New', monospace; font-size: 12px; overflow-x: auto;
+                                     white-space: pre-wrap; word-wrap: break-word; }}
+                    </style>
+                </head>
+                <body>
+                    <div class="header {'failed' if status == 'failed' else ''}">
+                        <h1>WorldPosta Automation Test Report</h1>
+                        <div class="status">{'✅ SUCCESS' if status == 'success' else '❌ FAILED'}</div>
+                    </div>
+
+                    <div class="content">
+                        <div class="section">
+                            <div class="section-title">📊 Test Information</div>
+                            <p><strong>Full Name:</strong> {self.account_data['full_name']}</p>
+                            <p><strong>Email:</strong> {self.account_data['email']}</p>
+                            <p><strong>Company:</strong> {self.account_data['company']}</p>
+                            <p><strong>Test Date:</strong> {self.status_log.get('timestamp', 'N/A')}</p>
+                            <p><strong>Status:</strong> <span class="{'error' if status == 'failed' else ''}">{status.upper()}</span></p>
+                        </div>
+
+                        <div class="section">
+                            <div class="section-title">{'❌ Error Details' if error_msg != 'None' else '✅ Status'}</div>
+                            <p class="{'error' if error_msg != 'None' else ''}">{error_msg}</p>
+                        </div>
+
+                        <div class="section">
+                            <div class="section-title">📄 JSON Logs</div>
+                            <div class="json-log">{json.dumps(self.status_log, indent=2)}</div>
+                        </div>
+
+                        <div class="section">
+                            <div class="section-title">📸 Screenshots</div>
+                            <p>All screenshots from the test run are attached to this email.</p>
+                        </div>
+                    </div>
+                </body>
+            </html>
+            """
+
+            # Attach HTML body
+            msg.attach(MIMEText(html_body, 'html'))
+
+            # === Attach Screenshots ===
+            screenshot_path = self.status_log.get('screenshot_path', '')
+            if screenshot_path:
+                # Extract directory from the screenshot path
+                # The screenshot_path contains individual filenames, but they're all in SCREENSHOT_DIR
+                screenshot_dir = SCREENSHOT_DIR
+
+                # Find all screenshots from this session (based on timestamp in filename)
+                import glob
+                timestamp_str = self.status_log.get('timestamp', '').replace(':', '-').replace(' ', '_')
+
+                # Get all PNG files in the screenshot directory
+                if os.path.exists(screenshot_dir):
+                    all_screenshots = glob.glob(os.path.join(screenshot_dir, "*.png"))
+
+                    # Try to attach recent screenshots
+                    for screenshot_file in all_screenshots:
+                        try:
+                            with open(screenshot_file, 'rb') as f:
+                                img_data = f.read()
+                                image = MIMEImage(img_data, name=os.path.basename(screenshot_file))
+                                msg.attach(image)
+                            print(f"  ✅ Attached screenshot: {os.path.basename(screenshot_file)}")
+                        except Exception as e:
+                            print(f"  ⚠️  Failed to attach {os.path.basename(screenshot_file)}: {str(e)}")
+
+            # === Send Email ===
+            print(f"\n📤 Connecting to SMTP server: {SMTP_SERVER}:{SMTP_PORT}")
+
+            # Use SSL connection
+            with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+                print(f"  🔐 Logging in as: {self.account_data['email']}")
+                server.login(self.account_data['email'], self.account_data['password'])
+
+                print(f"  📧 Sending email to: {NOTIFICATION_RECIPIENT}")
+                server.send_message(msg)
+
+                print(f"  ✅ Email sent successfully!")
+
+            return True
+
+        except Exception as e:
+            print(f"❌ Failed to send email notification: {str(e)}")
+            print(f"   Error type: {type(e).__name__}")
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+            return False
+
+
     def perform_post_login_actions(self):
         """Perform actions after login: Click View Posta and View CloudEdge buttons with comprehensive validation"""
         print("\n" + "="*60)
@@ -1241,18 +1378,21 @@ class WorldPostaAutomationBot:
             if not self.register(account_data):
                 self.status_log['status'] = 'failed_registration'
                 self.save_status()
+                self.send_email_report()
                 return False
 
             # Step 2: Login to email
             if not self.login_to_email(account_data['email'], account_data['password']):
                 self.status_log['status'] = 'failed_email_login'
                 self.save_status()
+                self.send_email_report()
                 return False
 
             # Step 3: Find verification email
             if not self.find_verification_email():
                 self.status_log['status'] = 'failed_email_not_found'
                 self.save_status()
+                self.send_email_report()
                 return False
 
             # Step 4: Extract verification link
@@ -1260,24 +1400,28 @@ class WorldPostaAutomationBot:
             if not verification_url:
                 self.status_log['status'] = 'failed_no_verification_link'
                 self.save_status()
+                self.send_email_report()
                 return False
 
             # Step 5: Confirm email
             if not self.confirm_email(verification_url):
                 self.status_log['status'] = 'failed_email_confirmation'
                 self.save_status()
+                self.send_email_report()
                 return False
 
             # Step 6: Login to website
             if not self.login_to_website(account_data['email'], account_data['password']):
                 self.status_log['status'] = 'failed_website_login'
                 self.save_status()
+                self.send_email_report()
                 return False
 
             # Step 7: Perform post-login actions
             if not self.perform_post_login_actions():
                 self.status_log['status'] = 'failed_post_login_actions'
                 self.save_status()
+                self.send_email_report()
                 return False
 
             # Step 8: Take final screenshot
@@ -1291,6 +1435,9 @@ class WorldPostaAutomationBot:
             print("🎉 WORKFLOW COMPLETED SUCCESSFULLY!")
             print("="*60)
 
+            # Send email notification
+            self.send_email_report()
+
             return True
 
         except Exception as e:
@@ -1299,6 +1446,10 @@ class WorldPostaAutomationBot:
             self.status_log['error_message'] = error_msg
             self.status_log['status'] = 'failed_unexpected_error'
             self.save_status()
+
+            # Send email notification even on failure
+            self.send_email_report()
+
             return False
 
 
