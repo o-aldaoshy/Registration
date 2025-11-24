@@ -44,8 +44,13 @@ EMAIL_DOMAIN = "@worldposta.com"
 EMAIL_SUBJECT_KEYWORD = "Welcome To WorldPosta Business Email"
 
 # Email Notification Settings (Microsoft Exchange)
-SMTP_SERVER = "smtp.worldposta.com"
-SMTP_PORT = 587  # STARTTLS port for Microsoft Exchange
+# Multiple SMTP configurations to try (will attempt in order)
+SMTP_CONFIGS = [
+    {"server": "mail.worldposta.com", "port": 587, "use_ssl": False, "use_tls": True},   # STARTTLS
+    {"server": "mail.worldposta.com", "port": 465, "use_ssl": True, "use_tls": False},   # SSL
+    {"server": "smtp.worldposta.com", "port": 587, "use_ssl": False, "use_tls": True},   # STARTTLS
+    {"server": "smtp.worldposta.com", "port": 465, "use_ssl": True, "use_tls": False},   # SSL
+]
 NOTIFICATION_RECIPIENT = "o.aldaoshy@roaya.co"
 
 # Timeouts
@@ -1106,25 +1111,55 @@ class WorldPostaAutomationBot:
                             print(f"  ⚠️  Failed to attach {os.path.basename(screenshot_file)}: {str(e)}")
 
             # === Send Email ===
-            print(f"\n📤 Connecting to SMTP server: {SMTP_SERVER}:{SMTP_PORT}")
+            # Try each SMTP configuration until one works
+            last_error = None
+            for i, config in enumerate(SMTP_CONFIGS, 1):
+                try:
+                    smtp_server = config['server']
+                    smtp_port = config['port']
+                    use_ssl = config['use_ssl']
+                    use_tls = config['use_tls']
 
-            # Use STARTTLS connection for Microsoft Exchange
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-                print(f"  🔒 Starting TLS encryption...")
-                server.starttls()  # Upgrade to secure connection
+                    connection_type = "SSL" if use_ssl else ("STARTTLS" if use_tls else "Plain")
+                    print(f"\n📤 Attempt {i}/{len(SMTP_CONFIGS)}: Connecting to {smtp_server}:{smtp_port} ({connection_type})")
 
-                print(f"  🔐 Logging in as: {self.account_data['email']}")
-                server.login(self.account_data['email'], self.account_data['password'])
+                    # Create appropriate connection type
+                    if use_ssl:
+                        # Direct SSL connection (port 465)
+                        server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30)
+                    else:
+                        # Plain SMTP, optionally upgraded with STARTTLS (port 587 or 25)
+                        server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
+                        if use_tls:
+                            print(f"  🔒 Starting TLS encryption...")
+                            server.starttls()
 
-                print(f"  📧 Sending email to: {NOTIFICATION_RECIPIENT}")
-                server.send_message(msg)
+                    # Login and send
+                    print(f"  🔐 Logging in as: {self.account_data['email']}")
+                    server.login(self.account_data['email'], self.account_data['password'])
 
-                print(f"  ✅ Email sent successfully!")
+                    print(f"  📧 Sending email to: {NOTIFICATION_RECIPIENT}")
+                    server.send_message(msg)
 
-            return True
+                    print(f"  ✅ Email sent successfully using {smtp_server}:{smtp_port}!")
+                    server.quit()
+                    return True
+
+                except Exception as e:
+                    last_error = e
+                    error_type = type(e).__name__
+                    print(f"  ❌ Failed: {error_type} - {str(e)}")
+                    if i < len(SMTP_CONFIGS):
+                        print(f"  🔄 Trying next configuration...")
+                    continue
+
+            # All attempts failed
+            print(f"\n❌ All SMTP configurations failed. Last error:")
+            print(f"   {type(last_error).__name__}: {str(last_error)}")
+            return False
 
         except Exception as e:
-            print(f"❌ Failed to send email notification: {str(e)}")
+            print(f"❌ Unexpected error in send_email_report: {str(e)}")
             print(f"   Error type: {type(e).__name__}")
             import traceback
             print(f"   Traceback: {traceback.format_exc()}")
