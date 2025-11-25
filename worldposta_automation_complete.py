@@ -22,7 +22,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.action_chains import ActionChains
-from exchangelib import Credentials, Account, Configuration, DELEGATE, Message, Mailbox, HTMLBody, FileAttachment, BASIC, Version, Build
 
 
 # =====================================================
@@ -38,10 +37,7 @@ LOGIN_URL = "https://admin.worldposta.com/auth/login"
 EMAIL_DOMAIN = "@worldposta.com"
 EMAIL_SUBJECT_KEYWORD = "Welcome To WorldPosta Business Email"
 
-# Email Notification Settings (Microsoft Exchange Web Services)
-EWS_URL = "https://mail.worldposta.com/EWS/Exchange.asmx"
-EWS_USERNAME = "ai.dexter85@worldposta.com"
-EWS_PASSWORD = "gtzwO@lvr+A82biD5Xdmepf7rk/*yl1"
+# Email Notification Settings (via Webmail Interface)
 NOTIFICATION_RECIPIENT = "o.aldaoshy@roaya.co"
 
 # Timeouts
@@ -1065,75 +1061,185 @@ class WorldPostaAutomationBot:
             </html>
             """
 
-            # === Send Email using Exchange Web Services (EWS) ===
-            print(f"\n📤 Connecting to Exchange Web Services (EWS)")
-            print(f"   EWS URL: {EWS_URL}")
+            # === Send Email via Webmail Interface ===
+            print(f"\n📤 Sending email via webmail interface")
+            print(f"   Recipient: {NOTIFICATION_RECIPIENT}")
 
-            # Configure EWS connection
-            credentials = Credentials(username=EWS_USERNAME, password=EWS_PASSWORD)
+            # Navigate to webmail
+            print("  🌐 Navigating to webmail...")
+            self.driver.get(EMAIL_LOGIN_URL)
+            random_delay(2, 3)
 
-            # Specify Exchange version to avoid auto-detection (which causes 404)
-            version = Version(build=Build(15, 1))  # Exchange 2016
+            # Login to webmail (reuse existing logic)
+            print("  🔐 Logging into webmail...")
+            if not self.login_to_email(self.account_data['email'], self.account_data['password']):
+                print("  ❌ Failed to login to webmail")
+                return False
 
-            config = Configuration(
-                service_endpoint=EWS_URL,
-                credentials=credentials,
-                auth_type=BASIC,  # Use Basic HTTP authentication
-                version=version  # Explicitly set version to avoid auto-detection
-            )
-            account = Account(
-                primary_smtp_address=EWS_USERNAME,
-                config=config,
-                autodiscover=False,
-                access_type=DELEGATE
-            )
+            # Wait for inbox to load
+            random_delay(3, 5)
 
-            print(f"  🔐 Authenticated as: {EWS_USERNAME}")
+            # Look for "New Email" or "Compose" button
+            print("  ✉️  Looking for compose button...")
+            compose_selectors = [
+                'a[title*="New"]',
+                'button[title*="New"]',
+                'a[title*="Compose"]',
+                'button[title*="Compose"]',
+                '.newmail-button',
+                '#newmail',
+                'span:contains("New")',
+            ]
 
-            # Create message
-            message = Message(
-                account=account,
-                subject=subject,
-                body=HTMLBody(html_body),
-                to_recipients=[Mailbox(email_address=NOTIFICATION_RECIPIENT)]
-            )
+            compose_button = None
+            for selector in compose_selectors:
+                try:
+                    compose_button = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                    )
+                    print(f"  ✅ Found compose button with selector: {selector}")
+                    break
+                except:
+                    continue
 
-            # === Attach Screenshots ===
-            screenshot_path = self.status_log.get('screenshot_path', '')
-            attached_count = 0
+            if not compose_button:
+                print("  ❌ Could not find compose button")
+                return False
 
-            if screenshot_path:
-                screenshot_dir = SCREENSHOT_DIR
-                import glob
+            # Click compose button
+            print("  📝 Clicking compose button...")
+            compose_button.click()
+            random_delay(2, 3)
 
-                # Get all PNG files in the screenshot directory
-                if os.path.exists(screenshot_dir):
-                    all_screenshots = glob.glob(os.path.join(screenshot_dir, "*.png"))
+            # Fill in recipient
+            print("  👤 Filling recipient...")
+            recipient_selectors = ['input[name*="to"]', 'input[id*="to"]', 'input[placeholder*="To"]']
+            for selector in recipient_selectors:
+                try:
+                    recipient_field = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    recipient_field.clear()
+                    human_like_typing(recipient_field, NOTIFICATION_RECIPIENT)
+                    print(f"  ✅ Filled recipient: {NOTIFICATION_RECIPIENT}")
+                    break
+                except:
+                    continue
 
-                    # Try to attach recent screenshots
-                    for screenshot_file in all_screenshots:
-                        try:
-                            with open(screenshot_file, 'rb') as f:
-                                img_data = f.read()
-                                file_attachment = FileAttachment(
-                                    name=os.path.basename(screenshot_file),
-                                    content=img_data
-                                )
-                                message.attach(file_attachment)
-                                attached_count += 1
-                                print(f"  ✅ Attached screenshot: {os.path.basename(screenshot_file)}")
-                        except Exception as e:
-                            print(f"  ⚠️  Failed to attach {os.path.basename(screenshot_file)}: {str(e)}")
+            random_delay(1, 2)
 
-            # Send the message
-            print(f"  📧 Sending email to: {NOTIFICATION_RECIPIENT}")
-            print(f"  📎 Attachments: {attached_count} screenshot(s)")
+            # Fill in subject
+            print("  📋 Filling subject...")
+            subject_selectors = ['input[name*="subject"]', 'input[id*="subject"]', 'input[placeholder*="Subject"]']
+            for selector in subject_selectors:
+                try:
+                    subject_field = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    subject_field.clear()
+                    human_like_typing(subject_field, subject)
+                    print(f"  ✅ Filled subject: {subject}")
+                    break
+                except:
+                    continue
 
-            # Send without saving copy to Sent folder (avoids 404 errors)
-            message.send(save_copy=False)
+            random_delay(1, 2)
 
-            print(f"  ✅ Email sent successfully via EWS!")
-            return True
+            # Fill in body (try to use HTML if possible, otherwise plain text)
+            print("  📄 Filling email body...")
+
+            # Try to switch to HTML mode if available
+            html_mode_selectors = ['button[title*="HTML"]', 'a[title*="HTML"]', 'span:contains("HTML")']
+            for selector in html_mode_selectors:
+                try:
+                    html_button = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    html_button.click()
+                    random_delay(1, 2)
+                    break
+                except:
+                    continue
+
+            # Find body field
+            body_selectors = [
+                'textarea[name*="body"]',
+                'textarea[id*="body"]',
+                'div[contenteditable="true"]',
+                'iframe[id*="body"]',
+                'iframe[name*="body"]'
+            ]
+
+            body_filled = False
+            for selector in body_selectors:
+                try:
+                    if 'iframe' in selector:
+                        # Handle iframe
+                        iframe = self.driver.find_element(By.CSS_SELECTOR, selector)
+                        self.driver.switch_to.frame(iframe)
+                        body_field = self.driver.find_element(By.CSS_SELECTOR, 'body')
+                    else:
+                        body_field = self.driver.find_element(By.CSS_SELECTOR, selector)
+
+                    # Insert content
+                    if 'contenteditable' in selector or 'iframe' in selector:
+                        # Use JavaScript to insert HTML
+                        self.driver.execute_script(f"arguments[0].innerHTML = `{html_body}`;", body_field)
+                    else:
+                        # Plain text fallback
+                        plain_text = f"""
+WorldPosta Automation Test Report
+{'='*50}
+
+Status: {status.upper()}
+Full Name: {self.account_data['full_name']}
+Email: {self.account_data['email']}
+Company: {self.account_data['company']}
+Test Date: {self.status_log.get('timestamp', 'N/A')}
+
+Error: {error_msg}
+
+JSON Logs:
+{json.dumps(self.status_log, indent=2)}
+
+Screenshots saved to: {SCREENSHOT_DIR}
+                        """
+                        body_field.send_keys(plain_text)
+
+                    if 'iframe' in selector:
+                        self.driver.switch_to.default_content()
+
+                    body_filled = True
+                    print("  ✅ Filled email body")
+                    break
+                except Exception as e:
+                    if 'iframe' in selector:
+                        self.driver.switch_to.default_content()
+                    continue
+
+            if not body_filled:
+                print("  ⚠️  Could not fill email body")
+
+            random_delay(2, 3)
+
+            # Find and click send button
+            print("  📤 Looking for send button...")
+            send_selectors = [
+                'button[title*="Send"]',
+                'button[type="submit"]',
+                'button:contains("Send")',
+                'input[value*="Send"]',
+                '.send-button',
+                '#send',
+            ]
+
+            for selector in send_selectors:
+                try:
+                    send_button = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    print("  📨 Clicking send button...")
+                    send_button.click()
+                    random_delay(3, 5)
+                    print(f"  ✅ Email sent successfully to {NOTIFICATION_RECIPIENT}!")
+                    return True
+                except:
+                    continue
+
+            print("  ❌ Could not find send button")
+            return False
 
         except Exception as e:
             print(f"❌ Unexpected error in send_email_report: {str(e)}")
